@@ -1,0 +1,55 @@
+{
+  "name": "anytool",
+  "main": "src/worker.tsx",
+  "compatibility_date": "2025-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "vars": {
+    "ENVIRONMENT": "development"
+  },
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BUN_COMPILER_DO",
+        "class_name": "BunCompiler"
+      },
+      {
+        "name": "HISTORY_DO",
+        "class_name": "HistoryStore"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["BunCompiler"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["HistoryStore"]
+    }
+  ],
+
+  "containers": [
+    {
+      "name": "bun-compiler",
+      "class_name": "BunCompiler",
+      "image": "./container/Dockerfile"
+    }
+  ],
+
+  "worker_loaders": [
+    {
+      "binding": "LOADER"
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "TOOL_CACHE",
+      "bucket_name": "anytool-cache"
+    }
+  ]
+}
