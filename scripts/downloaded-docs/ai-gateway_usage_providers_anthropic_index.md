@@ -1,0 +1,92 @@
+---
+title: Anthropic · Cloudflare AI Gateway docs
+description: Anthropic helps build reliable, interpretable, and steerable AI systems.
+lastUpdated: 2025-08-19T11:42:14.000Z
+chatbotDeprioritize: false
+source_url:
+  html: https://developers.cloudflare.com/ai-gateway/usage/providers/anthropic/
+  md: https://developers.cloudflare.com/ai-gateway/usage/providers/anthropic/index.md
+---
+
+[Anthropic](https://www.anthropic.com/) helps build reliable, interpretable, and steerable AI systems.
+
+## Endpoint
+
+```txt
+https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic
+```
+
+## Prerequisites
+
+When making requests to Anthropic, ensure you have the following:
+
+* Your AI Gateway Account ID.
+* Your AI Gateway gateway name.
+* An active Anthropic API token.
+* The name of the Anthropic model you want to use.
+
+## Examples
+
+### cURL
+
+```bash
+curl https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic/v1/messages \
+ --header 'x-api-key: {anthropic_api_key}' \
+ --header 'anthropic-version: 2023-06-01' \
+ --header 'Content-Type: application/json' \
+ --data  '{
+    "model": "claude-3-opus-20240229",
+    "max_tokens": 1024,
+    "messages": [
+      {"role": "user", "content": "What is Cloudflare?"}
+    ]
+  }'
+```
+
+### Use Anthropic SDK with JavaScript
+
+If you are using the `@anthropic-ai/sdk`, you can set your endpoint like this:
+
+```js
+import Anthropic from "@anthropic-ai/sdk";
+
+
+const apiKey = env.ANTHROPIC_API_KEY;
+const accountId = "{account_id}";
+const gatewayId = "{gateway_id}";
+const baseURL = `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/anthropic`;
+
+
+const anthropic = new Anthropic({
+  apiKey,
+  baseURL,
+});
+
+
+const model = "claude-3-opus-20240229";
+const messages = [{ role: "user", content: "What is Cloudflare?" }];
+const maxTokens = 1024;
+
+
+const message = await anthropic.messages.create({
+  model,
+  messages,
+  max_tokens: maxTokens,
+});
+```
+
+## OpenAI-Compatible Endpoint
+
+You can also use the [OpenAI-compatible endpoint](https://developers.cloudflare.com/ai-gateway/usage/chat-completion/) (`/ai-gateway/usage/chat-completion/`) to access Anthropic models using the OpenAI API schema. To do so, send your requests to:
+
+```txt
+https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/compat/chat/completions
+```
+
+Specify:
+
+```json
+{
+"model": "anthropic/{model}"
+}
+```

@@ -1,0 +1,46 @@
+---
+title: Replicate · Cloudflare AI Gateway docs
+description: Replicate runs and fine tunes open-source models.
+lastUpdated: 2025-08-19T11:42:14.000Z
+chatbotDeprioritize: false
+source_url:
+  html: https://developers.cloudflare.com/ai-gateway/usage/providers/replicate/
+  md: https://developers.cloudflare.com/ai-gateway/usage/providers/replicate/index.md
+---
+
+[Replicate](https://replicate.com/) runs and fine tunes open-source models.
+
+## Endpoint
+
+```txt
+https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/replicate
+```
+
+## URL structure
+
+When making requests to Replicate, replace `https://api.replicate.com/v1` in the URL you're currently using with `https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/replicate`.
+
+## Prerequisites
+
+When making requests to Replicate, ensure you have the following:
+
+* Your AI Gateway Account ID.
+* Your AI Gateway gateway name.
+* An active Replicate API token.
+* The name of the Replicate model you want to use.
+
+## Example
+
+### cURL
+
+```bash
+curl https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/replicate/predictions \
+  --header 'Authorization: Token {replicate_api_token}' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "input":
+      {
+        "prompt": "What is Cloudflare?"
+      }
+    }'
+```

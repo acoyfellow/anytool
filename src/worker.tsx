@@ -12,7 +12,7 @@ import { marked } from 'marked';
 const examples = [
   "Make a UUID generator using the uuid package",
   "Create a markdown to HTML converter using marked",
-  "Build a QR code generator that outputs PNG images using qrcode package",
+  "Build a QR code generator that outputs SVG using qrcode-generator package",
   "Make a JWT token decoder that validates claims using jsonwebtoken",
   "Build a password strength meter using zxcvbn that scores passwords",
   "Create a fake person generator using faker.js with name, email, address",
@@ -217,6 +217,146 @@ app.use(
   )
 );
 
+// Cloudflare Workers Environment Context
+const CF_WORKERS_CONTEXT = `
+CLOUDFLARE WORKERS RUNTIME ENVIRONMENT:
+
+AVAILABLE APIS:
+- fetch() - HTTP requests (primary network API)
+- crypto.subtle - Web Crypto API for encryption/hashing
+- TextEncoder/TextDecoder - Text encoding/decoding
+- URL, URLSearchParams - URL manipulation
+- JSON - JSON parsing/stringification
+- Math, Date, RegExp - Standard JavaScript objects
+- ArrayBuffer, Uint8Array, etc. - Binary data handling
+- Promise, async/await - Asynchronous operations
+
+NOT AVAILABLE (will cause errors):
+- Node.js APIs (fs, path, os, process.env, Buffer, etc.)
+- DOM APIs (document, window, canvas, etc.)
+- Raw TCP/UDP sockets
+- File system access
+- Child processes
+- Native modules/bindings
+
+RUNTIME LIMITS:
+- Memory: 128MB per request
+- CPU: 50ms execution time
+- Response size: 100MB max
+- Network: Only via fetch(), no raw sockets
+
+PACKAGE COMPATIBILITY:
+- Must be pure JavaScript (no native dependencies)
+- Cannot rely on Node.js APIs or DOM
+- Should work in V8 isolate environment
+- ESM imports only (import/export syntax)
+`;
+
+// Known Working Packages Database
+const KNOWN_PACKAGES = {
+  // ✅ Confirmed Working
+  'uuid': {
+    works: true,
+    usage: 'import { v4 as uuidv4 } from "uuid"',
+    example: 'const id = uuidv4();',
+    description: 'Generate UUIDs'
+  },
+  'lodash': {
+    works: true,
+    usage: 'import _ from "lodash"',
+    example: 'const result = _.uniq([1,2,2,3]);',
+    description: 'Utility functions'
+  },
+  'date-fns': {
+    works: true,
+    usage: 'import { format, addDays } from "date-fns"',
+    example: 'const formatted = format(new Date(), "yyyy-MM-dd");',
+    description: 'Date manipulation'
+  },
+  'crypto-js': {
+    works: true,
+    usage: 'import CryptoJS from "crypto-js"',
+    example: 'const hash = CryptoJS.SHA256("text").toString();',
+    description: 'Cryptographic functions'
+  },
+  'marked': {
+    works: true,
+    usage: 'import { marked } from "marked"',
+    example: 'const html = marked("# Hello");',
+    description: 'Markdown to HTML'
+  },
+  'zxcvbn': {
+    works: true,
+    usage: 'import zxcvbn from "zxcvbn"',
+    example: 'const result = zxcvbn("password");',
+    description: 'Password strength checking'
+  },
+  '@faker-js/faker': {
+    works: true,
+    usage: 'import { faker } from "@faker-js/faker"',
+    example: 'const name = faker.person.fullName();',
+    description: 'Generate fake data for testing'
+  },
+  'qrcode-generator': {
+    works: true,
+    usage: 'import qrcode from "qrcode-generator"',
+    example: 'const qr = qrcode(0, "M"); qr.addData("text"); qr.make(); const svg = qr.createSvgTag();',
+    description: 'QR code generation (SVG/ASCII only)'
+  },
+
+  // ❌ Known Incompatible
+  'qrcode': {
+    works: false,
+    reason: 'Requires canvas/DOM APIs not available in Workers',
+    alternative: 'Use qrcode-generator instead'
+  },
+  'jsonwebtoken': {
+    works: false,
+    reason: 'Uses Node.js process object not available in Workers',
+    alternative: 'Use jose or pure JS JWT libraries'
+  },
+  'ajv': {
+    works: false,
+    reason: 'Uses eval/Function constructors blocked by CSP in Workers',
+    alternative: 'Use zod for schema validation'
+  },
+  'sentiment': {
+    works: false,
+    reason: 'Package API usage issues in Workers environment',
+    alternative: 'Use vader-sentiment or implement simple sentiment rules'
+  },
+  'faker': {
+    works: false,
+    reason: 'Old package name, use @faker-js/faker instead',
+    alternative: 'Use @faker-js/faker package'
+  },
+  'node-fetch': {
+    works: false,
+    reason: 'Not needed in Workers, use built-in fetch() instead',
+    alternative: 'Use built-in fetch() function available in Workers'
+  },
+  'sharp': {
+    works: false,
+    reason: 'Native image processing library, requires Node.js',
+    alternative: 'Use Web APIs or pure JS alternatives'
+  },
+  'puppeteer': {
+    works: false,
+    reason: 'Browser automation, requires full browser',
+    alternative: 'Use fetch() for web scraping'
+  },
+  'fs-extra': {
+    works: false,
+    reason: 'File system operations not available',
+    alternative: 'Use fetch() for remote data or in-memory operations'
+  },
+  'express': {
+    works: false,
+    reason: 'Node.js web framework, use Hono instead',
+    alternative: 'Workers use different request/response model'
+  }
+};
+
 // Simple hash function
 async function hashPrompt(prompt: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -311,6 +451,104 @@ async function compileTool(code: string, env: Cloudflare.Env): Promise<{ bundled
     console.error("Failed to parse compilation response as JSON:", responseText.substring(0, 200));
     throw new Error(`Invalid JSON response from compiler: ${responseText.substring(0, 100)}`);
   }
+}
+
+// Code Validation Pipeline
+async function validateGeneratedCode(
+  code: string,
+  testInput: string,
+  hash: string,
+  env: Cloudflare.Env
+): Promise<{ valid: boolean; error?: string; result?: any }> {
+  try {
+    console.log(`Validating generated code for hash: ${hash.substring(0, 8)}`);
+
+    // Step 1: Test compilation
+    const compiled = await compileTool(code, env);
+
+    // Step 2: Test execution with sample input
+    const result = await executeTool(compiled.bundledCode, testInput, `${hash}-validation`, env, undefined);
+
+    // Step 3: Check if result looks valid (not an error message)
+    if (result.output.toLowerCase().includes('error') && result.contentType.includes('text')) {
+      throw new Error(`Generated code produces error output: ${result.output}`);
+    }
+
+    // Step 4: Basic output validation
+    if (!result.output || result.output.trim().length === 0) {
+      throw new Error('Generated code produces empty output');
+    }
+
+    // Step 5: Content type validation
+    // Check for obvious content-type mismatches
+    if (result.output.startsWith('<svg')) {
+      // SVG content should have SVG content type
+      if (!result.contentType.includes('image/svg') && !result.contentType.includes('text/plain')) {
+        throw new Error(`SVG output detected but content-type is '${result.contentType}', expected 'image/svg+xml'`);
+      }
+    } else if (result.output.startsWith('data:image/png')) {
+      // PNG data URL should have appropriate content type
+      if (!result.contentType.includes('image/png') && !result.contentType.includes('text/plain')) {
+        throw new Error(`PNG data URL detected but content-type is '${result.contentType}', expected 'image/png' or 'text/plain'`);
+      }
+    } else if (result.output.startsWith('data:image/')) {
+      // Other image data URLs should use text/plain or matching content type
+      const dataUrlType = result.output.match(/^data:([^;]+)/)?.[1];
+      if (dataUrlType && !result.contentType.includes(dataUrlType) && !result.contentType.includes('text/plain')) {
+        throw new Error(`Data URL type '${dataUrlType}' doesn't match content-type '${result.contentType}'`);
+      }
+    } else if (result.output.startsWith('<html') || result.output.includes('</html>')) {
+      // HTML content should have HTML content type
+      if (!result.contentType.includes('text/html')) {
+        throw new Error(`HTML output detected but content-type is '${result.contentType}', expected 'text/html'`);
+      }
+    } else if (result.output.startsWith('{') || result.output.startsWith('[')) {
+      // JSON content should have JSON content type
+      try {
+        JSON.parse(result.output);
+        if (!result.contentType.includes('application/json')) {
+          throw new Error(`JSON output detected but content-type is '${result.contentType}', expected 'application/json'`);
+        }
+      } catch {
+        // Not valid JSON, ignore
+      }
+    }
+
+    console.log(`Code validation successful for hash: ${hash.substring(0, 8)}`);
+    return { valid: true, result };
+
+  } catch (error) {
+    console.error(`Code validation failed for hash: ${hash.substring(0, 8)}:`, error);
+    return {
+      valid: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+// Package Compatibility Checker
+function checkPackageCompatibility(packages: string[]): { compatible: string[]; incompatible: string[]; warnings: string[] } {
+  const compatible: string[] = [];
+  const incompatible: string[] = [];
+  const warnings: string[] = [];
+
+  for (const pkg of packages) {
+    const known = KNOWN_PACKAGES[pkg];
+    if (known) {
+      if (known.works) {
+        compatible.push(pkg);
+      } else {
+        incompatible.push(pkg);
+        warnings.push(`Package '${pkg}' is incompatible: ${known.reason}${known.alternative ? `. Alternative: ${known.alternative}` : ''}`);
+      }
+    } else {
+      // Unknown package - add warning but allow it
+      compatible.push(pkg);
+      warnings.push(`Package '${pkg}' compatibility unknown - proceeding with caution`);
+    }
+  }
+
+  return { compatible, incompatible, warnings };
 }
 
 // Execute tool using Worker Loaders
@@ -452,41 +690,68 @@ app.post("/api/tool", async (c) => {
         }),
         prompt: `Create a Cloudflare Worker that implements: ${prompt}
 
-EXACT FORMAT REQUIRED:
+${CF_WORKERS_CONTEXT}
+
+WORKING PACKAGE EXAMPLES:
+${Object.entries(KNOWN_PACKAGES)
+  .filter(([_, info]) => (info as any).works)
+  .map(([name, info]) => `- ${name}: ${(info as any).description}\n  Usage: ${(info as any).usage}\n  Example: ${(info as any).example}`)
+  .join('\n')}
+
+INCOMPATIBLE PACKAGES (DO NOT USE):
+${Object.entries(KNOWN_PACKAGES)
+  .filter(([_, info]) => !(info as any).works)
+  .map(([name, info]) => `- ${name}: ${(info as any).reason}`)
+  .join('\n')}
+
+EXACT CODE FORMAT REQUIRED:
 import { something } from 'package-name';
 
 export default {
   fetch(req, env, ctx) {
-    // your code here
-    return new Response('result', { headers: { 'Content-Type': 'text/plain' } });
+    try {
+      const input = new URL(req.url).searchParams.get('q') || 'default';
+      // your implementation here
+      return new Response('result', {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      return new Response('Error: ' + error.message, {
+        status: 500,
+        headers: { 'Content-Type': 'text/plain' }
+      });
+    }
   }
 }
 
-CRITICAL REQUIREMENTS:
+IMPLEMENTATION REQUIREMENTS:
 - Must follow EXACT format above (simple object literal export)
-- ONLY import npm packages if you ACTUALLY USE them in your code - unused imports cause errors
-- If you import a package, you MUST use it in your implementation
-- WORKER COMPATIBILITY: Only use packages that work in Cloudflare Workers (no DOM, no Node.js APIs)
-- RECOMMENDED PACKAGES: uuid, lodash, date-fns, crypto-js, marked, zxcvbn
-- AVOID: qrcode (needs canvas), sharp (needs Node), puppeteer, any DOM-dependent packages
-- When possible, implement with native fetch() and Web APIs instead of importing packages
-- Write PLAIN JAVASCRIPT (no TypeScript types like req: Request, env: any)
-- NO async/await in import statements - use static imports only
-- NO dynamic imports - all imports must be at the top of file
-- NO require() statements
-- Add try/catch for error handling inside fetch function
-- Return new Response() with proper headers
-- Accept input via URL query parameter ?q=INPUT - use new URL(req.url).searchParams.get('q')
-- Always have a sensible default value for the input, so empty calls don't error
-- If no suitable package is available, implement without imports or return an error
-- Match your outputType choice: 'image' = return base64 data or data URLs, 'html' = return HTML, 'json' = return JSON, etc.
-- For images: return base64 strings, data URLs, or raw image data
-- For HTML: return complete HTML snippets that can be directly rendered
-- CRITICAL: If using async operations, make fetch function async and await all promises
-- NEVER return [object Promise] - always await async operations before returning
-- FOR QR CODES: Use 'qr-code-generator' package (pure JS, no canvas) or implement simple QR logic
-- FOR IMAGES: Return base64 string or data URL, NOT a Promise object
-- WORKERS LIMITATION: No canvas/DOM/Node APIs - only Web APIs and pure JS packages
+- ONLY import packages you ACTUALLY USE - unused imports cause compilation errors
+- Use KNOWN WORKING packages from the list above when possible
+- If you need a package not in the list, prefer pure JavaScript alternatives
+- Write PLAIN JAVASCRIPT (no TypeScript annotations)
+- Static imports only at top of file (no dynamic imports, no require())
+- Always include try/catch for proper error handling
+- Accept input via URL query parameter ?q=INPUT
+- Provide sensible defaults for empty input
+- Return new Response() with proper Content-Type headers
+- For async operations: make fetch function async and await all promises
+- NEVER return [object Promise] - always await before returning
+
+OUTPUT TYPE GUIDELINES:
+- 'text': Plain text, strings, data URLs (use Content-Type: 'text/plain')
+- 'json': JSON objects/arrays (use Content-Type: 'application/json')
+- 'html': HTML content (use Content-Type: 'text/html')
+- 'svg': SVG markup (use Content-Type: 'image/svg+xml')
+- 'image': Base64 data or data URLs for images
+- 'csv': CSV data (use Content-Type: 'text/csv')
+- 'xml': XML data (use Content-Type: 'application/xml')
+
+Your generated code will be automatically validated by:
+1. Package compatibility checking
+2. Compilation testing
+3. Runtime execution testing
+If validation fails, generation will be retried with feedback.
 
 WORKING EXAMPLES:
 
@@ -527,21 +792,51 @@ export default {
 }`
       });
 
-      // 4. Compile code
+      // 4. Check package compatibility
+      const packageCheck = checkPackageCompatibility(
+        result.object.typescript.match(/from\s+['\"`]([^'\"`\s]+)['\"`]/g)?.map(match =>
+          match.match(/from\s+['\"`]([^'\"`\s]+)['\"`]/)?.[1]
+        ).filter(Boolean) || []
+      );
+
+      if (packageCheck.warnings.length > 0) {
+        console.warn("Package compatibility warnings:", packageCheck.warnings);
+      }
+
+      if (packageCheck.incompatible.length > 0) {
+        throw new Error(`Incompatible packages detected: ${packageCheck.incompatible.join(', ')}. ${packageCheck.warnings.join(' ')}`);
+      }
+
+      // 5. Compile code
       const compiled = await compileTool(result.object.typescript, c.env);
 
-      // 5. Cache compiled tool
+      // 6. Validate generated code with test execution
+      const validation = await validateGeneratedCode(
+        result.object.typescript,
+        result.object.example || "test",
+        hash,
+        c.env
+      );
+
+      if (!validation.valid) {
+        console.error(`Generated code validation failed: ${validation.error}`);
+        throw new Error(`Generated code validation failed: ${validation.error}`);
+      }
+
+      // 7. Cache validated tool
       tool = {
         hash,
         bundledCode: compiled.bundledCode,
         createdAt: Date.now(),
         packages: compiled.packages,
         outputType: result.object.outputType,
-        outputDescription: result.object.outputDescription
+        outputDescription: result.object.outputDescription,
+        validated: true,
+        validationResult: validation.result
       };
 
       await cache.set(hash, tool);
-      console.log(`Cached tool: ${hash.substring(0, 8)} with ${tool.packages.length} packages`);
+      console.log(`Cached validated tool: ${hash.substring(0, 8)} with ${tool.packages.length} packages`);
     } else {
       console.log("Cache hit - using cached tool");
     }
@@ -824,8 +1119,18 @@ app.get("/", async (c) => {
                 }
                 break;
 
+              case 'text':
               default:
-                container.textContent = output;
+                // Check if text output is actually a data URL (common for images returned as text)
+                if (output.startsWith('data:image/')) {
+                  const img = document.createElement('img');
+                  img.src = output;
+                  img.style.maxWidth = '100%';
+                  img.style.height = 'auto';
+                  container.appendChild(img);
+                } else {
+                  container.textContent = output;
+                }
             }
           }
 
@@ -919,6 +1224,37 @@ app.get("/ping-container", async (c) => {
     });
   } catch (error) {
     console.error("Container ping error:", error);
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+});
+
+// NPM Search API
+app.post("/api/npm-search", async (c) => {
+  try {
+    const { query } = await c.req.json();
+    if (!query?.trim()) {
+      return Response.json({ error: "Missing search query" }, { status: 400 });
+    }
+
+    const response = await fetch(`https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(query)}&size=10`);
+    if (!response.ok) {
+      throw new Error(`NPM search failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const packages = data.objects.map(pkg => ({
+      name: pkg.package.name,
+      description: pkg.package.description,
+      version: pkg.package.version,
+      keywords: pkg.package.keywords || [],
+      downloadCount: pkg.score.detail.popularity,
+      quality: pkg.score.detail.quality,
+      maintenance: pkg.score.detail.maintenance
+    }));
+
+    return Response.json({ packages });
+  } catch (error) {
+    console.error("NPM search error:", error);
     return Response.json({ error: error.message }, { status: 500 });
   }
 });

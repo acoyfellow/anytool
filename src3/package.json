@@ -1,0 +1,64 @@
+{
+  "name": "@anytool/core",
+  "version": "1.0.0",
+  "description": "Intelligent dynamic tool generation for Cloudflare Workers",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src/**/*.ts",
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "package.json"
+  ],
+  "keywords": [
+    "cloudflare-workers",
+    "dynamic-tools",
+    "ai-generation",
+    "worker-runtime",
+    "tool-generation",
+    "edge-computing",
+    "serverless"
+  ],
+  "author": {
+    "name": "Jordan",
+    "email": "jordan@example.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/anytool-core"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/anytool-core/issues"
+  },
+  "homepage": "https://github.com/your-org/anytool-core#readme",
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4.0.0",
+    "hono": "^4.0.0"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^2.0.0",
+    "ai": "^5.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "eslint": "^9.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

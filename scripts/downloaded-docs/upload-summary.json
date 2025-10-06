@@ -1,0 +1,15 @@
+{
+  "timestamp": "2025-10-03T19:37:39.582Z",
+  "bucket": "anytool-docs",
+  "inputDirectory": "downloaded-docs",
+  "results": {
+    "uploaded": 1612,
+    "failed": 0,
+    "total": 1612
+  },
+  "nextSteps": [
+    "Configure AI Search to index the R2 bucket",
+    "Set up Workers binding for the AI Search instance",
+    "Test search functionality"
+  ]
+}

@@ -1,18 +1,18 @@
 {
   "name": "anytool",
-  "main": "src/worker.tsx",
+  "main": "src4/worker.tsx",
   "compatibility_date": "2025-10-01",
   "compatibility_flags": ["nodejs_compat"],
-
-  "vars": {
-    "ENVIRONMENT": "development"
+  "observability": {
+    "enabled": true,
   },
+
 
   "durable_objects": {
     "bindings": [
       {
-        "name": "BUN_COMPILER_DO",
-        "class_name": "BunCompiler"
+        "name": "COMPILER_DO",
+        "class_name": "Compiler"
       },
       {
         "name": "HISTORY_DO",
@@ -23,19 +23,15 @@
 
   "migrations": [
     {
-      "tag": "v1",
-      "new_sqlite_classes": ["BunCompiler"]
-    },
-    {
-      "tag": "v2",
+      "tag": "v3",
       "new_sqlite_classes": ["HistoryStore"]
     }
   ],
 
   "containers": [
     {
-      "name": "bun-compiler",
-      "class_name": "BunCompiler",
+      "name": "compiler",
+      "class_name": "Compiler",
       "image": "./container/Dockerfile"
     }
   ],

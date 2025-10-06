@@ -19,7 +19,7 @@ try {
     const url = new URL(req.url);
 
     // Health check endpoints
-    if (req.method === 'GET' && (url.pathname === '/ping' || url.pathname === '/health')) {
+    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/ping')) {
       return new Response(JSON.stringify({
         message: 'Hello from Bun container!',
         timestamp: new Date().toISOString(),
@@ -100,52 +100,14 @@ try {
       };
     }
 
-    const workspaceDir = `/tmp/worker-${Date.now()}`;
-    console.log("Creating workspace:", workspaceDir);
-    await fs.mkdir(workspaceDir, { recursive: true });
-
-    try {
-      // Create package.json
-      const packageJson = {
-        name: "dynamic-worker",
-        type: "module",
-        dependencies: Object.fromEntries(packages.map(pkg => [pkg, "latest"]))
-      };
-      console.log("Creating package.json:", packageJson);
-      await fs.writeFile(path.join(workspaceDir, 'package.json'), JSON.stringify(packageJson, null, 2));
-
-      // Write the worker code
-      console.log("Writing worker code to file");
-      await fs.writeFile(path.join(workspaceDir, 'worker.js'), code);
-
-      // Try to install dependencies with bun (may fail due to network restrictions)
-      console.log("Running bun install...");
-      try {
-        await runCommand('bun', ['install'], workspaceDir);
-        console.log("bun install completed");
-
-        // Bundle with bun if install succeeded
-        console.log("Running bun build...");
-        const bundleResult = await runCommand('bun', ['build', 'worker.js', '--target=browser', '--format=esm'], workspaceDir, true);
-        console.log("bun build completed, output length:", bundleResult.stdout.length);
-
-        return {
-          mainCode: bundleResult.stdout,
-          additionalModules: {},
-          packages
-        };
-      } catch (installError) {
-        console.error("Package installation failed:", installError.message);
-        throw installError;
-      }
-    } catch (error) {
-      console.error("Error in compileCode:", error);
-      throw error;
-    } finally {
-      // Cleanup
-      console.log("Cleaning up workspace");
-      await fs.rm(workspaceDir, { recursive: true, force: true });
-    }
+    // Return raw code without bundling to avoid Node.js polyfill issues
+    console.log("Container environment detected - returning raw code without bundling");
+    console.log("Packages that would be installed:", packages);
+    return {
+      mainCode: code,
+      additionalModules: {},
+      packages: [] // Return empty packages since we can't install them
+    };
   }
 
 
@@ -173,8 +135,13 @@ function runCommand(command, args, cwd, captureOutput = false) {
     process.on('close', (code) => {
       console.log(`Command ${command} finished with code ${code}`);
       if (captureOutput) {
-        console.log("stdout:", stdout.substring(0, 500));
-        console.log("stderr:", stderr.substring(0, 500));
+        console.log("stdout length:", stdout.length);
+        console.log("stderr length:", stderr.length);
+        console.log("stdout preview:", stdout.substring(0, 1000));
+        console.log("stderr preview:", stderr.substring(0, 1000));
+        if (stderr.length > 1000) {
+          console.log("stderr full:", stderr);
+        }
       }
 
       if (code === 0) {
@@ -182,8 +149,9 @@ function runCommand(command, args, cwd, captureOutput = false) {
       } else {
         console.error(`Command failed: ${command} ${args.join(' ')}`);
         console.error(`Exit code: ${code}`);
-        console.error(`stderr: ${stderr}`);
-        reject(new Error(`${command} failed with code ${code}: ${stderr}`));
+        console.error(`Full stderr:`, stderr);
+        console.error(`Full stdout:`, stdout);
+        reject(new Error(`${command} failed with code ${code}: ${stderr.substring(0, 500)}`));
       }
     });
 
