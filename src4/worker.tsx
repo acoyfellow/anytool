@@ -6,7 +6,8 @@ import { generateObject } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
 import { DurableObject, DurableObjectState, ExecutionContext, WorkerEntrypoint } from "cloudflare:workers";
-import type { R2Bucket, Cloudflare } from "cloudflare:workers";
+import type { Cloudflare } from "cloudflare:workers";
+import { examples } from "../shared/examples";
 
 // Lightweight proxy to intercept fetch calls from dynamic workers
 export class OutboundProxy extends WorkerEntrypoint<Cloudflare.Env> {
@@ -26,6 +27,130 @@ export class OutboundProxy extends WorkerEntrypoint<Cloudflare.Env> {
 // No auth complexity - just one hardcoded API key for now
 const DOGFOOD_API_KEY = "anytool-internal-dogfood-key-2024";
 
+// Cloudflare Workers Environment Context
+const CF_WORKERS_CONTEXT = `
+CLOUDFLARE WORKERS RUNTIME ENVIRONMENT:
+
+AVAILABLE APIS:
+- fetch() - HTTP requests (primary network API)
+- crypto.subtle - Web Crypto API for encryption/hashing
+- TextEncoder/TextDecoder - Text encoding/decoding
+- URL, URLSearchParams - URL manipulation
+- JSON - JSON parsing/stringification
+- Math, Date, RegExp - Standard JavaScript objects
+- ArrayBuffer, Uint8Array, etc. - Binary data handling
+
+CONSTRAINTS:
+- Memory: 128MB per request, CPU: 50ms limit
+- Available: fetch(), crypto.subtle, TextEncoder/TextDecoder, URL, JSON, etc.
+- NOT available: Node.js APIs (fs, path, http, etc.), DOM APIs, Canvas
+`;
+
+// Known Working Packages Database
+const KNOWN_PACKAGES = {
+  // ✅ Confirmed Working
+  'uuid': {
+    works: true,
+    usage: 'import { v4 as uuidv4 } from "uuid"',
+    example: 'const id = uuidv4();',
+    description: 'Generate UUIDs'
+  },
+  'lodash': {
+    works: true,
+    usage: 'import _ from "lodash"',
+    example: 'const result = _.uniq([1,2,2,3]);',
+    description: 'Utility functions'
+  },
+  'date-fns': {
+    works: true,
+    usage: 'import { format, addDays } from "date-fns"',
+    example: 'const formatted = format(new Date(), "yyyy-MM-dd");',
+    description: 'Date manipulation'
+  },
+  'crypto-js': {
+    works: true,
+    usage: 'import CryptoJS from "crypto-js"',
+    example: 'const hash = CryptoJS.SHA256("text").toString();',
+    description: 'Cryptographic functions'
+  },
+  'marked': {
+    works: true,
+    usage: 'import { marked } from "marked"',
+    example: 'const html = marked("# Hello");',
+    description: 'Markdown to HTML'
+  },
+  'zxcvbn': {
+    works: true,
+    usage: 'import zxcvbn from "zxcvbn"',
+    example: 'const result = zxcvbn("password");',
+    description: 'Password strength checking'
+  },
+  '@faker-js/faker': {
+    works: true,
+    usage: 'import { faker } from "@faker-js/faker"',
+    example: 'const name = faker.person.fullName();',
+    description: 'Generate fake data for testing'
+  },
+  'qrcode-generator': {
+    works: true,
+    usage: 'import qrcode from "qrcode-generator"',
+    example: 'const qr = qrcode(0, "M"); qr.addData("text"); qr.make(); const svg = qr.createSvgTag();',
+    description: 'QR code generation (SVG/ASCII only)'
+  },
+
+  // ❌ Known Incompatible
+  'qrcode': {
+    works: false,
+    reason: 'Requires canvas/DOM APIs not available in Workers',
+    alternative: 'Use qrcode-generator instead'
+  },
+  'jsonwebtoken': {
+    works: false,
+    reason: 'Uses Node.js process object not available in Workers',
+    alternative: 'Use jose or pure JS JWT libraries'
+  },
+  'ajv': {
+    works: false,
+    reason: 'Uses eval/Function constructors blocked by CSP in Workers',
+    alternative: 'Use zod for schema validation'
+  },
+  'sentiment': {
+    works: false,
+    reason: 'Package API usage issues in Workers environment',
+    alternative: 'Use vader-sentiment or implement simple sentiment rules'
+  },
+  'faker': {
+    works: false,
+    reason: 'Old package name, use @faker-js/faker instead',
+    alternative: 'Use @faker-js/faker package'
+  },
+  'node-fetch': {
+    works: false,
+    reason: 'Not needed in Workers, use built-in fetch() instead',
+    alternative: 'Use built-in fetch() function available in Workers'
+  },
+  'sharp': {
+    works: false,
+    reason: 'Native image processing library, requires Node.js',
+    alternative: 'Use Web APIs or pure JS alternatives'
+  },
+  'puppeteer': {
+    works: false,
+    reason: 'Browser automation, requires full browser',
+    alternative: 'Use fetch() for web scraping'
+  },
+  'fs-extra': {
+    works: false,
+    reason: 'File system operations not available',
+    alternative: 'Use fetch() for remote data or in-memory operations'
+  },
+  'express': {
+    works: false,
+    reason: 'Node.js web framework, use Hono instead',
+    alternative: 'Workers use different request/response model'
+  }
+};
+
 const app = new Hono<{ Bindings: Cloudflare.Env }>();
 
 app.use(
@@ -36,7 +161,7 @@ app.use(
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <title>Anytool v4</title>
+          <title>Anytool</title>
           <script src="https://cdn.tailwindcss.com"></script>
           <style>
             * { font-family: ui-monospace, monospace; }
@@ -95,6 +220,8 @@ app.post("/api/tool", async (c) => {
     return Response.json({ error: "Invalid or missing API key" }, { status: 401 });
   }
 
+  let hash: string | undefined;
+
   try {
     const { prompt, input = "", forceRegenerate = false } = await c.req.json();
 
@@ -103,7 +230,7 @@ app.post("/api/tool", async (c) => {
     }
 
     // 1. Hash prompt for caching
-    const hash = await hashPrompt(prompt);
+    hash = await hashPrompt(prompt);
     console.log(`Tool request: ${hash.substring(0, 8)} - ${prompt}`);
 
     // 2. Check cache (unless forcing regeneration)
@@ -138,82 +265,126 @@ app.post("/api/tool", async (c) => {
     // Get relevant documentation from R2 AI Search
     const relevantDocs = await getRelevantDocs(prompt, c.env.AI);
 
+    console.log("Relevant docs:", relevantDocs);
+
     // Build smart prompt with live documentation
     let smartPrompt = `Create a Cloudflare Worker that implements: ${prompt}
 
 ${relevantDocs}
 
-CLOUDFLARE WORKERS ENVIRONMENT:
-- V8 JavaScript engine with Web APIs
-- No Node.js APIs (fs, path, os, process, etc.)
-- ESM modules only (import/export syntax)
-- Memory: 128MB per request, CPU: 50ms limit
-- Available: fetch(), crypto.subtle, TextEncoder/TextDecoder, URL, JSON, etc.
+${CF_WORKERS_CONTEXT}
 
-⚠️ CRITICAL: PREFER BUILT-IN WEB APIs OVER EXTERNAL PACKAGES ⚠️
+WORKING PACKAGE EXAMPLES:
+${Object.entries(KNOWN_PACKAGES)
+  .filter(([_, info]) => (info as any).works)
+  .map(([name, info]) => `- ${name}: ${(info as any).description}\n  Usage: ${(info as any).usage}\n  Example: ${(info as any).example}`)
+  .join('\n')}
 
-BUILT-IN APIs AVAILABLE (USE THESE FIRST):
-- crypto.randomUUID() - Generate UUIDs (NO package needed)
-- crypto.subtle - Cryptographic operations (SHA, HMAC, etc.)
-- fetch() - HTTP requests (NO package needed)
-- TextEncoder/TextDecoder - Text encoding
-- URL, URLSearchParams - URL manipulation
-- Date, Math, JSON - Standard objects
-- btoa(), atob() - Base64 encoding/decoding
+INCOMPATIBLE PACKAGES (DO NOT USE):
+${Object.entries(KNOWN_PACKAGES)
+  .filter(([_, info]) => !(info as any).works)
+  .map(([name, info]) => `- ${name}: ${(info as any).reason}`)
+  .join('\n')}
 
-EXTERNAL PACKAGES (AVOID UNLESS ABSOLUTELY NECESSARY):
-Currently external packages are not properly bundled.
-Use built-in APIs whenever possible instead.
-
-EXACT CODE FORMAT (NO EXTERNAL PACKAGES):
+EXACT CODE FORMAT REQUIRED:
+import { something } from 'package-name';
 
 export default {
-  fetch(request, env, ctx) {
+  fetch(req, env, ctx) {
     try {
-      const url = new URL(request.url);
-      const input = url.searchParams.get('q') || 'default';
-
-      // Use BUILT-IN APIs only:
-      // - crypto.randomUUID() for UUIDs
-      // - fetch() for HTTP requests
-      // - crypto.subtle for cryptography
-      // - Date, Math, JSON for common operations
-
-      const result = processInput(input);
-
-      return new Response(JSON.stringify(result), {
+      const input = new URL(req.url).searchParams.get('q') || 'default';
+      // your implementation here
+      return new Response('result', {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
+      return new Response('Error: ' + error.message, {
         status: 500,
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'text/plain' }
       });
     }
   }
 }
 
-REQUIREMENTS:
-- Plain JavaScript only (no TypeScript)
-- NO external package imports - use built-in Web APIs only
-- Always include try/catch
-- Input via ?q=VALUE query parameter
-- Return Response with proper Content-Type
+IMPLEMENTATION REQUIREMENTS:
+- Must follow EXACT format above (simple object literal export)
+- ONLY import packages you ACTUALLY USE - unused imports cause compilation errors
+- Use KNOWN WORKING packages from the list above when possible
+- If you need a package not in the list, prefer pure JavaScript alternatives
+- Write PLAIN JAVASCRIPT (no TypeScript annotations)
+- Static imports only at top of file (no dynamic imports, no require())
+- Always include try/catch for proper error handling
+- Accept input via URL query parameter ?q=INPUT
+- Provide sensible defaults for empty input
+- Return new Response() with proper Content-Type headers
 - For async operations: make fetch function async and await all promises
-- Use crypto.randomUUID() for UUIDs, fetch() for HTTP, crypto.subtle for cryptography`;
+- NEVER return [object Promise] - always await before returning
+
+OUTPUT TYPE GUIDELINES:
+- 'text': Plain text, strings, data URLs (use Content-Type: 'text/plain')
+- 'json': JSON objects/arrays (use Content-Type: 'application/json')
+- 'html': HTML content (use Content-Type: 'text/html')
+- 'svg': SVG markup (use Content-Type: 'image/svg+xml')
+- 'image': Base64 data or data URLs for images
+- 'csv': CSV data (use Content-Type: 'text/csv')
+- 'xml': XML data (use Content-Type: 'application/xml')
+
+Your generated code will be automatically validated by:
+1. Package compatibility checking
+2. Compilation testing
+3. Runtime execution testing
+If validation fails, generation will be retried with feedback.
+
+WORKING EXAMPLES:
+
+// Simple sync example:
+import { v4 as uuidv4 } from 'uuid';
+
+export default {
+  fetch(req, env, ctx) {
+    try {
+      const uuid = uuidv4();
+      return new Response(JSON.stringify({ uuid }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      return new Response('Error', { status: 500 });
+    }
+  }
+}
+
+// QR code example with worker-compatible package:
+import qrcode from 'qrcode-generator';
+
+export default {
+  fetch(req, env, ctx) {
+    try {
+      const input = new URL(req.url).searchParams.get('q') || 'Hello World';
+      const qr = qrcode(0, 'M');
+      qr.addData(input);
+      qr.make();
+      const svgString = qr.createSvgTag(4, 0);
+      return new Response(svgString, {
+        headers: { 'Content-Type': 'image/svg+xml' }
+      });
+    } catch (error) {
+      return new Response('Error generating QR code', { status: 500 });
+    }
+  }
+}`;
 
     // Generate with AI (with retry on failure)
     const openai = createOpenAI({ apiKey: c.env.OPENAI_API_KEY });
     let result: any;
     let compiled: any;
     let retryCount = 0;
-    const maxRetries = 2;
+    const maxRetries = 0;
 
     while (retryCount <= maxRetries) {
       try {
         // Generate tool code
         result = await generateObject({
-          model: openai("gpt-4o-mini"),
+          model: openai("gpt-5-mini"),
           schema: z.object({
             typescript: z.string().describe("Complete Cloudflare Worker code"),
             example: z.string().describe("Example input value (just the value, not full URL)"),
@@ -288,6 +459,17 @@ Please analyze this error and generate corrected code.`;
 
   } catch (error) {
     console.error("Tool execution error:", error);
+
+    // Clear cache for failed tool so it regenerates on next try
+    if (c.env.TOOL_CACHE && hash) {
+      try {
+        await c.env.TOOL_CACHE.delete(`tools/${hash}.json`);
+        console.log(`Cleared cache for failed tool: ${hash.substring(0, 8)}`);
+      } catch (cacheError) {
+        console.warn("Failed to clear cache:", cacheError);
+      }
+    }
+
     return Response.json({
       error: `Tool failed: ${error instanceof Error ? error.message : String(error)}`
     }, { status: 500 });
@@ -296,16 +478,40 @@ Please analyze this error and generate corrected code.`;
 
 // Health check
 app.get("/health", async (c) => {
-  const container = c.env.COMPILER_DO.getByName('compiler');
-  const response = await container.fetch('http://container/ping');
-  const result = await response.json();
-  console.log("container ping", result);
-  return Response.json({
-    status: "healthy",
-    service: "anytool",
-    version: "0.0.1",
-    containerPing: result
-  });
+  try {
+    const compilerDO = c.env.COMPILER_DO.get(c.env.COMPILER_DO.idFromName('compiler'));
+    const response = await compilerDO.fetch('http://localhost/_health');
+
+    console.log("Container response status:", response.status);
+    console.log("Container response headers:", Object.fromEntries(response.headers.entries()));
+
+    const responseText = await response.text();
+    console.log("Container response text:", responseText);
+
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (parseError) {
+      console.warn("Container response is not JSON:", responseText);
+      result = { rawResponse: responseText };
+    }
+
+    return Response.json({
+      status: "healthy",
+      service: "anytool",
+      version: "0.0.1",
+      containerPing: result,
+      containerStatus: response.status
+    });
+  } catch (error) {
+    console.error("Health check failed:", error);
+    return Response.json({
+      status: "unhealthy",
+      service: "anytool",
+      version: "0.0.1",
+      error: error.message
+    }, { status: 500 });
+  }
 });
 
 // Frontend
@@ -314,7 +520,7 @@ app.get("/", async (c) => {
     <div className="bg-gray-900 text-gray-100 min-h-screen p-8">
       <div className="max-w-4xl mx-auto space-y-6">
         <div>
-          <h1 className="text-3xl font-bold">Anytool v4</h1>
+          <h1 className="text-3xl font-bold">Anytool</h1>
           <p className="text-gray-400">AI-powered tool generation with search</p>
         </div>
 
@@ -366,18 +572,12 @@ app.get("/", async (c) => {
         <div className="bg-gray-800 p-6 rounded-lg">
           <h3 className="text-lg font-medium mb-4">Quick Examples</h3>
           <div className="grid gap-2">
-            <button onclick="setPrompt('Create a UUID generator')" className="text-left p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">
-              Create a UUID generator
-            </button>
-            <button onclick="setPrompt('Generate a QR code as SVG')" className="text-left p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">
-              Generate a QR code as SVG
-            </button>
-            <button onclick="setPrompt('Create a password strength checker')" className="text-left p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">
-              Create a password strength checker
-            </button>
-            <button onclick="setPrompt('Convert markdown to HTML')" className="text-left p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">
-              Convert markdown to HTML
-            </button>
+            {examples.map((example) => (
+              <button onclick={`setPrompt('${example}')`} className="text-left p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">
+                {example}
+              </button>
+            ))}
+
           </div>
         </div>
 
@@ -494,8 +694,8 @@ async function compileTool(
       throw new Error('COMPILER_DO container binding not available');
     }
     console.log("Using container for compilation...", typeof env.COMPILER_DO);
-    const container = env.COMPILER_DO.getByName('compiler');
-    response = await container.fetch('http://container/compile', {
+    const compilerDO = env.COMPILER_DO.get(env.COMPILER_DO.idFromName('compiler'));
+    response = await compilerDO.fetch('http://localhost/compile', {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code })
@@ -601,7 +801,78 @@ app.delete("/api/cache", async (c) => {
   }
 });
 
-// Compiler Durable Object (same as before)
+// History management routes
+app.get("/recent", async (c) => {
+  let recent: string[] = [];
+  if (c.env.HISTORY_DO) {
+    const historyId = c.env.HISTORY_DO.idFromName('history');
+    const historyStub = c.env.HISTORY_DO.get(historyId);
+    const response = await historyStub.fetch('http://history/list');
+    recent = await response.json();
+  }
+
+  return c.render(
+    <div className="bg-gray-900 text-gray-100 min-h-screen">
+      <div className="container mx-auto px-4 py-8 max-w-4xl">
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-bold">Recent Prompts</h1>
+          <div className="flex gap-3">
+            <button onclick="clearAll()" className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded">
+              Clear All
+            </button>
+            <a href="/" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded">
+              Back to Tool
+            </a>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          {recent.length === 0 ? (
+            <p className="text-gray-400">No prompts yet. Create some tools first!</p>
+          ) : (
+            recent.map((prompt, i) => (
+              <div key={i} className="bg-gray-800 p-4 rounded-lg">
+                <button
+                  onclick={`loadPrompt('${prompt.replace(/'/g, "\\'")}', event)`}
+                  className="w-full text-left text-gray-100 hover:text-blue-400 transition-colors"
+                >
+                  {prompt}
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+
+        <script dangerouslySetInnerHTML={{__html: `
+          function clearAll() {
+            if (confirm('Clear all history?')) {
+              fetch('/api/clear-history', { method: 'DELETE' })
+                .then(() => location.reload())
+                .catch(err => alert('Error: ' + err.message));
+            }
+          }
+
+          function loadPrompt(prompt, event) {
+            event.preventDefault();
+            sessionStorage.setItem('loadPrompt', prompt);
+            window.location.href = '/';
+          }
+        `}} />
+      </div>
+    </div>
+  );
+});
+
+app.delete("/api/clear-history", async (c) => {
+  if (c.env.HISTORY_DO) {
+    const historyId = c.env.HISTORY_DO.idFromName('history');
+    const historyStub = c.env.HISTORY_DO.get(historyId);
+    await historyStub.fetch('http://history/clear', { method: 'DELETE' });
+  }
+  return Response.json({ message: "History cleared" });
+});
+
+// Compiler Durable Object with Container
 export class Compiler extends DurableObject<Cloudflare.Env> {
   container: globalThis.Container;
 
@@ -609,26 +880,59 @@ export class Compiler extends DurableObject<Cloudflare.Env> {
     super(ctx, env);
     this.container = ctx.container!;
     void this.ctx.blockConcurrencyWhile(async () => {
-      if (!this.container.running) {
-        await this.container.start();
-      }
+      if (!this.container.running) this.container.start();
     });
   }
 
-  async fetch(req: Request): Promise<Response> {
+  async fetch(req: Request) {
     try {
-      const url = req.url.replace('https:', 'http:');
-      return await this.container.getTcpPort(3000).fetch(url, req);
-    } catch (err: any) {
+      return await this.container.getTcpPort(8080).fetch(req.url.replace('https:', 'http:'), req);
+    } catch (err) {
       return new Response(`${this.ctx.id.toString()}: ${err.message}`, { status: 500 });
     }
   }
 }
 
-// HistoryStore Durable Object (placeholder for now)
+// HistoryStore Durable Object
 export class HistoryStore extends DurableObject<Cloudflare.Env> {
-  async fetch(req: Request): Promise<Response> {
-    return new Response("HistoryStore not implemented yet", { status: 200 });
+  async add(prompt: string): Promise<void> {
+    if (prompt?.trim()) {
+      const history = await this.list();
+      // Remove duplicates and add to front
+      const updated = [prompt, ...history.filter(p => p !== prompt)].slice(0, 50);
+      await this.ctx.storage.put('prompts', updated);
+    }
+  }
+
+  async list(): Promise<string[]> {
+    return (await this.ctx.storage.get<string[]>('prompts')) || [];
+  }
+
+  async clear(): Promise<void> {
+    await this.ctx.storage.delete('prompts');
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const method = request.method;
+
+    if (method === 'POST' && url.pathname === '/add') {
+      const { prompt } = await request.json() as { prompt: string };
+      await this.add(prompt);
+      return new Response('OK');
+    }
+
+    if (method === 'GET' && url.pathname === '/list') {
+      const history = await this.list();
+      return Response.json(history);
+    }
+
+    if (method === 'DELETE' && url.pathname === '/clear') {
+      await this.clear();
+      return new Response('OK');
+    }
+
+    return new Response('Not found', { status: 404 });
   }
 }
 

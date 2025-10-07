@@ -1,6 +1,6 @@
 {
   "name": "anytool",
-  "main": "src4/worker.tsx",
+  "main": "src5/worker.tsx",
   "compatibility_date": "2025-10-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
@@ -8,33 +8,6 @@
   },
 
 
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "COMPILER_DO",
-        "class_name": "Compiler"
-      },
-      {
-        "name": "HISTORY_DO",
-        "class_name": "HistoryStore"
-      }
-    ]
-  },
-
-  "migrations": [
-    {
-      "tag": "v3",
-      "new_sqlite_classes": ["HistoryStore"]
-    }
-  ],
-
-  "containers": [
-    {
-      "name": "compiler",
-      "class_name": "Compiler",
-      "image": "./container/Dockerfile"
-    }
-  ],
 
   "worker_loaders": [
     {
@@ -47,5 +20,9 @@
       "binding": "TOOL_CACHE",
       "bucket_name": "anytool-cache"
     }
-  ]
+  ],
+
+  "ai": {
+    "binding": "AI"
+  },
 }

@@ -7,19 +7,42 @@ console.log('Bun version:', Bun.version);
 console.log('Platform:', process.platform);
 console.log('Working directory:', process.cwd());
 console.log('Environment:', process.env.NODE_ENV);
+console.log('Process argv:', process.argv);
+console.log('Available commands check...');
+
+// Check if required commands are available
+try {
+  console.log('Testing bun install...');
+  const proc = Bun.spawn(['bun', '--version'], { stdout: 'pipe' });
+  const testResult = await new Response(proc.stdout).text();
+  console.log('Bun test result:', testResult);
+} catch (error) {
+  console.error('Bun test failed:', error);
+}
 
 try {
-  console.log('Attempting to start server on 0.0.0.0:3000...');
+  console.log('Testing mkdir...');
+  const proc = Bun.spawn(['mkdir', '--help'], { stdout: 'pipe' });
+  await new Response(proc.stdout).text();
+  console.log('mkdir available');
+} catch (error) {
+  console.error('mkdir test failed:', error);
+}
+
+// Skip network connectivity test in production to avoid startup issues
+
+try {
+  console.log('Attempting to start server on 0.0.0.0:8080...');
 
   const server = Bun.serve({
-    port: 3000,
-    hostname: '0.0.0.0',
+    port: 8080,
+    hostname: "0.0.0.0",
     development: false,
     async fetch(req) {
     const url = new URL(req.url);
 
     // Health check endpoints
-    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/ping')) {
+    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/ping' || url.pathname === '/_health')) {
       return new Response(JSON.stringify({
         message: 'Hello from Bun container!',
         timestamp: new Date().toISOString(),
@@ -38,6 +61,12 @@ try {
       console.log("Received compile request");
       const body = await req.text();
       console.log("Request body:", body);
+      console.log("Environment check:", {
+        platform: process.platform,
+        cwd: process.cwd(),
+        tmpDir: '/tmp',
+        bunVersion: Bun.version
+      });
 
       let parsed;
       try {
@@ -68,7 +97,17 @@ try {
       });
     } catch (error) {
       console.error("Compilation error:", error);
-      return new Response(JSON.stringify({ error: error.message }), {
+      console.error("Error stack:", error.stack);
+      console.error("Error details:", {
+        name: error.name,
+        message: error.message,
+        cause: error.cause
+      });
+      return new Response(JSON.stringify({
+        error: error.message,
+        stack: error.stack,
+        details: error.toString()
+      }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
@@ -100,14 +139,80 @@ try {
       };
     }
 
-    // Return raw code without bundling to avoid Node.js polyfill issues
-    console.log("Container environment detected - returning raw code without bundling");
-    console.log("Packages that would be installed:", packages);
-    return {
-      mainCode: code,
-      additionalModules: {},
-      packages: [] // Return empty packages since we can't install them
-    };
+    // Use bun to install packages and bundle code
+    console.log("Installing packages and bundling code with bun");
+
+    // Create temporary directory for this compilation
+    const tempDir = `/tmp/compile-${Date.now()}`;
+    await runCommand('mkdir', ['-p', tempDir], process.cwd());
+
+    try {
+      // Write the code to a file
+      await fs.writeFile(`${tempDir}/index.js`, code);
+
+      // Create package.json with the required packages
+      const packageJson = {
+        name: "temp-tool",
+        version: "1.0.0",
+        type: "module",
+        dependencies: {}
+      };
+
+      // Add packages as dependencies with specific versions to avoid resolution issues
+      const packageVersions = {
+        'uuid': '^9.0.0',
+        'marked': '^5.0.0',
+        'qrcode-generator': '^1.4.4',
+        'jsonwebtoken': '^9.0.0',
+        'zxcvbn': '^4.4.2',
+        'faker': '^7.6.0',
+        'slugify': '^1.6.6',
+        'bcryptjs': '^2.4.3',
+        'chroma-js': '^2.4.2',
+        'ajv': '^8.12.0',
+        'sentiment': '^5.0.2'
+      };
+
+      for (const pkg of packages) {
+        packageJson.dependencies[pkg] = packageVersions[pkg] || "^1.0.0";
+      }
+
+      await fs.writeFile(`${tempDir}/package.json`, JSON.stringify(packageJson, null, 2));
+
+      // Install packages with bun
+      console.log("Installing packages:", packages);
+      try {
+        await runCommand('bun', ['install', '--no-verify'], tempDir);
+        console.log("Bun install completed successfully");
+      } catch (installError) {
+        console.error("Bun install failed:", installError);
+        console.error("Install error details:", installError.message);
+        throw new Error(`Package installation failed: ${installError.message}`);
+      }
+
+      // Bundle with bun
+      console.log("Bundling code...");
+      const { stdout } = await runCommand('bun', ['build', 'index.js', '--outdir', '.', '--target', 'browser'], tempDir, true);
+
+      // Read the bundled output
+      const bundledCode = await fs.readFile(`${tempDir}/index.js`, 'utf8');
+
+      console.log("Bundling successful, output size:", bundledCode.length);
+
+      return {
+        mainCode: bundledCode,
+        additionalModules: {},
+        packages: packages
+      };
+
+    } finally {
+      // Clean up temp directory
+      try {
+        await runCommand('rm', ['-rf', tempDir], process.cwd());
+      } catch (cleanupError) {
+        console.warn("Failed to clean up temp directory:", cleanupError);
+      }
+    }
   }
 
 
@@ -163,7 +268,7 @@ function runCommand(command, args, cwd, captureOutput = false) {
   }
 
   console.log('Server object:', server);
-  console.log('Bun compilation service listening on 0.0.0.0:3000');
+  console.log('Bun compilation service listening on 0.0.0.0:8080');
   console.log('Server started successfully!');
 
   // Keep the process alive
