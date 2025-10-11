@@ -1,0 +1,121 @@
+{
+  ".svelte-kit/generated/server/internal.js": {
+    "file": "internal.js",
+    "name": "internal",
+    "src": ".svelte-kit/generated/server/internal.js",
+    "isEntry": true,
+    "imports": [
+      "_app-server.js",
+      "_async.js",
+      "_app-shared-server.js"
+    ],
+    "dynamicImports": [
+      "src/hooks.server.ts"
+    ]
+  },
+  "_app-server.js": {
+    "file": "chunks/app-server.js",
+    "name": "app-server"
+  },
+  "_app-shared-server.js": {
+    "file": "chunks/app-shared-server.js",
+    "name": "app-shared-server"
+  },
+  "_async.js": {
+    "file": "chunks/async.js",
+    "name": "async",
+    "imports": [
+      "_app-server.js"
+    ]
+  },
+  "_auth.js": {
+    "file": "chunks/auth.js",
+    "name": "auth",
+    "imports": [
+      "_app-server.js"
+    ]
+  },
+  "_exports.js": {
+    "file": "chunks/exports.js",
+    "name": "exports"
+  },
+  "node_modules/@sveltejs/kit/src/runtime/app/server/remote/index.js": {
+    "file": "remote-entry.js",
+    "name": "remote-entry",
+    "src": "node_modules/@sveltejs/kit/src/runtime/app/server/remote/index.js",
+    "isEntry": true,
+    "imports": [
+      "_app-server.js"
+    ]
+  },
+  "node_modules/@sveltejs/kit/src/runtime/components/svelte-5/error.svelte": {
+    "file": "entries/fallbacks/error.svelte.js",
+    "name": "entries/fallbacks/error.svelte",
+    "src": "node_modules/@sveltejs/kit/src/runtime/components/svelte-5/error.svelte",
+    "isEntry": true,
+    "imports": [
+      "_async.js",
+      "_app-server.js",
+      "_exports.js"
+    ]
+  },
+  "node_modules/@sveltejs/kit/src/runtime/server/index.js": {
+    "file": "index.js",
+    "name": "index",
+    "src": "node_modules/@sveltejs/kit/src/runtime/server/index.js",
+    "isEntry": true,
+    "imports": [
+      "_app-server.js",
+      "_exports.js",
+      "_app-shared-server.js",
+      ".svelte-kit/generated/server/internal.js"
+    ]
+  },
+  "src/hooks.server.ts": {
+    "file": "chunks/hooks.server.js",
+    "name": "hooks.server",
+    "src": "src/hooks.server.ts",
+    "isDynamicEntry": true,
+    "imports": [
+      "_auth.js",
+      "_app-server.js"
+    ]
+  },
+  "src/routes/+layout.server.ts": {
+    "file": "entries/pages/_layout.server.ts.js",
+    "name": "entries/pages/_layout.server.ts",
+    "src": "src/routes/+layout.server.ts",
+    "isEntry": true
+  },
+  "src/routes/+layout.svelte": {
+    "file": "entries/pages/_layout.svelte.js",
+    "name": "entries/pages/_layout.svelte",
+    "src": "src/routes/+layout.svelte",
+    "isEntry": true,
+    "imports": [
+      "_async.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_layout.gUSe26vJ.css"
+    ]
+  },
+  "src/routes/+page.svelte": {
+    "file": "entries/pages/_page.svelte.js",
+    "name": "entries/pages/_page.svelte",
+    "src": "src/routes/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_async.js",
+      "_app-server.js"
+    ]
+  },
+  "src/routes/api/auth/[...all]/+server.ts": {
+    "file": "entries/endpoints/api/auth/_...all_/_server.ts.js",
+    "name": "entries/endpoints/api/auth/_...all_/_server.ts",
+    "src": "src/routes/api/auth/[...all]/+server.ts",
+    "isEntry": true,
+    "imports": [
+      "_auth.js"
+    ]
+  }
+}
